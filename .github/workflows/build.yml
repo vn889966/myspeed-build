@@ -1,0 +1,66 @@
+name: build-myspeed
+
+# 从上游源码编译 MySpeed,产出 linux 二进制。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone upstream
+        run: git clone --depth 1 https://github.com/ljw98/MySpeed.git src
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build frontend
+        working-directory: src/frontend
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm build
+
+      - name: Copy frontend into Go embed dir
+        run: |
+          rm -rf src/backend-go/static/*
+          mkdir -p src/backend-go/static
+          cp -r src/frontend/dist/* src/backend-go/static/
+          ls -la src/backend-go/static/ | head
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build binary
+        working-directory: src/backend-go
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "$GITHUB_WORKSPACE/myspeed-linux-amd64" .
+          ls -la "$GITHUB_WORKSPACE/myspeed-linux-amd64"
+
+      - name: Commit binary
+        run: |
+          cp myspeed-linux-amd64 myspeed-linux-amd64.tmp
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f myspeed-linux-amd64.tmp 2>/dev/null || true
+          echo "构建产物大小: $(stat -c%s myspeed-linux-amd64) 字节"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myspeed-linux-amd64
+          path: myspeed-linux-amd64
+          retention-days: 30
